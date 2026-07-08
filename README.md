@@ -15,6 +15,7 @@ An end-to-end CI/CD pipeline demo built around [azure-governance-analyzer](https
 | **Security in the pipeline (DevSecOps)** | Trivy scans the container image, `tfsec` scans the Terraform config — both wired into CI |
 | **Secrets management** | Azure login via **OIDC federated credentials** (`azure/login@v2`), not a stored client secret/password |
 | **Deployment pattern** | The analyzer runs as a **scheduled Container App Job** (batch/cron), not a long-running service — the correct Azure primitive for a CLI tool that runs, produces a report, and exits |
+| **Container orchestration (Kubernetes)** | [`k8s/cronjob.yaml`](k8s/cronjob.yaml) — the same batch workload expressed as a native Kubernetes `CronJob`, built and run successfully against a local cluster (see below) |
 
 ## Why a Container App *Job*, not a web app or AKS
 
@@ -32,6 +33,8 @@ azure-devops-pipeline-demo/
 │   ├── variables.tf
 │   ├── main.tf                # ACR, Log Analytics, Container Apps Environment, Container App Job
 │   └── outputs.tf
+├── k8s/
+│   └── cronjob.yaml            # Kubernetes-native equivalent of the Container App Job
 ├── app/                        # containerized governance analyzer (from azure-governance-analyzer)
 │   ├── main.py
 │   ├── azure_client.py
@@ -68,6 +71,17 @@ cd terraform
 terraform init -backend=false
 terraform validate
 ```
+
+### Kubernetes (runs against a local cluster — e.g. Docker Desktop's built-in one)
+
+```bash
+docker build -t governance-analyzer:local .   # image must exist locally first
+kubectl apply -f k8s/cronjob.yaml
+kubectl create job --from=cronjob/governance-check governance-check-manual-test
+kubectl logs -l job-name=governance-check-manual-test
+```
+
+This was built and verified end-to-end against a local Docker Desktop Kubernetes cluster — the job actually runs and produces the same findings output as the Docker and Terraform paths.
 
 ## About the CD workflow — and why it isn't actually deployed here
 

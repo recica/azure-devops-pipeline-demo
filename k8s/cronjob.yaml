@@ -1,0 +1,40 @@
+# Kubernetes equivalent of the Azure Container Apps Job in terraform/main.tf —
+# same workload (a batch CLI tool that runs, writes a report, exits), expressed
+# as the K8s-native primitive for scheduled batch work instead of an Azure one.
+# Built and tested against a local Docker Desktop cluster; imagePullPolicy is
+# set to Never because the image is built locally, not pushed to a registry.
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: governance-check
+  labels:
+    app: governance-analyzer
+spec:
+  schedule: "0 6 * * *" # daily at 06:00
+  concurrencyPolicy: Forbid
+  successfulJobsHistoryLimit: 3
+  failedJobsHistoryLimit: 3
+  jobTemplate:
+    spec:
+      backoffLimit: 1
+      activeDeadlineSeconds: 300
+      template:
+        spec:
+          restartPolicy: Never
+          containers:
+            - name: governance-analyzer
+              image: governance-analyzer:local
+              imagePullPolicy: Never
+              resources:
+                requests:
+                  cpu: "100m"
+                  memory: "128Mi"
+                limits:
+                  cpu: "250m"
+                  memory: "256Mi"
+              securityContext:
+                runAsNonRoot: true
+                runAsUser: 1000 # matches "appuser" created in the Dockerfile; k8s can't verify
+                                 # a non-numeric USER against runAsNonRoot without this
+                allowPrivilegeEscalation: false
+                readOnlyRootFilesystem: false # the container writes report files at runtime

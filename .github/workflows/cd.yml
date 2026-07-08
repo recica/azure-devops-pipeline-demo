@@ -1,0 +1,62 @@
+name: CD
+
+# Deploys on every push to main, once CI has passed. Requires three repository
+# secrets (AZURE_CLIENT_ID, AZURE_TENANT_ID, AZURE_SUBSCRIPTION_ID) tied to an
+# Entra ID App Registration with federated OIDC credentials for this repo —
+# no client secret or password stored in GitHub. See README for setup.
+on:
+  workflow_run:
+    workflows: ["CI"]
+    branches: [main]
+    types: [completed]
+
+permissions:
+  id-token: write # required for OIDC login to Azure
+  contents: read
+
+jobs:
+  deploy:
+    name: Deploy Infrastructure & Image
+    runs-on: ubuntu-latest
+    if: ${{ github.event.workflow_run.conclusion == 'success' }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Azure login (OIDC, no stored credentials)
+        uses: azure/login@v2
+        with:
+          client-id: ${{ secrets.AZURE_CLIENT_ID }}
+          tenant-id: ${{ secrets.AZURE_TENANT_ID }}
+          subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+
+      - uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: "1.9.8"
+
+      - name: Terraform init
+        working-directory: terraform
+        run: terraform init
+
+      - name: Terraform apply
+        working-directory: terraform
+        run: |
+          terraform apply -auto-approve \
+            -var="container_image_tag=${{ github.sha }}"
+
+      - name: Get ACR login server
+        id: acr
+        working-directory: terraform
+        run: echo "server=$(terraform output -raw container_registry_login_server)" >> "$GITHUB_OUTPUT"
+
+      - name: Build and push image to ACR
+        run: |
+          az acr login --name $(echo "${{ steps.acr.outputs.server }}" | cut -d. -f1)
+          docker build -t ${{ steps.acr.outputs.server }}/governance-analyzer:${{ github.sha }} .
+          docker push ${{ steps.acr.outputs.server }}/governance-analyzer:${{ github.sha }}
+
+      - name: Trigger a manual run of the scheduled job
+        working-directory: terraform
+        run: |
+          job_name=$(terraform output -raw container_app_job_name)
+          rg_name=$(terraform output -raw resource_group_name)
+          az containerapp job start --name "$job_name" --resource-group "$rg_name"

@@ -1,0 +1,8 @@
+terraform/
+tests/
+.github/
+.git/
+__pycache__/
+*.pyc
+governance_report.csv
+governance_report.md
